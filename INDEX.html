@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-Hant"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI 魔王城：智慧大陸大冒險</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#12121f;color:#eee;font-family:"Noto Sans TC","Microsoft JhengHei",sans-serif}
+#app{max-width:980px;margin:auto;padding:10px;position:relative}
+h1{font-size:18px;margin:4px 0 8px;text-align:center}
+.bars{display:flex;gap:12px;margin-bottom:6px}
+.bar{flex:1;font-size:13px}
+.bar i{display:block;height:16px;background:#333;border-radius:8px;overflow:hidden;margin-top:2px}
+.bar b{display:block;height:100%;transition:width .5s}
+#hpb{background:#4cd964}#ehb{background:#ff4d4d}
+canvas{width:100%;border-radius:10px;display:block;background:#000}
+#qp{background:#1e1e36;border-radius:10px;padding:12px;margin-top:8px;min-height:190px}
+#qno{font-size:13px;color:#ffd166}
+#qt{font-size:17px;margin:6px 0 10px;line-height:1.5}
+#opts{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+#opts button{padding:10px;border:2px solid #4a4a7a;background:#2a2a4a;color:#fff;border-radius:8px;font-size:15px;text-align:left;cursor:pointer}
+#opts button:hover:not(:disabled){border-color:#ffd166}
+#opts button:disabled{opacity:.55;cursor:default}
+.ov{position:absolute;inset:0;background:rgba(10,10,25,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:20px;border-radius:10px;z-index:5}
+.ov h2{font-size:26px;margin:6px}
+.ov p{max-width:520px;line-height:1.7;color:#ccd}
+.ov button,.ov input{font-size:16px;padding:10px 20px;border-radius:8px;border:0;margin:6px}
+.ov button{background:#ffd166;color:#222;cursor:pointer;font-weight:700}
+.ov input{background:#fff;color:#222;text-align:center}
+.hide{display:none}
+@media(max-width:560px){#opts{grid-template-columns:1fr}}
+</style></head>
+<body><div id="app">
+<h1>⚔️ AI 魔王城：智慧大陸大冒險</h1>
+<div class="bars">
+ <div class="bar">🦸 勇者 HP <span id="hpt">100</span><i><b id="hpb" style="width:100%"></b></i></div>
+ <div class="bar"><span id="en">敵人</span> HP <span id="eht">100</span><i><b id="ehb" style="width:100%"></b></i></div>
+ <div class="bar" style="flex:.5">分數 <span id="sc">0</span></div>
+</div>
+<canvas id="cv" width="960" height="400"></canvas>
+<div id="qp"><div id="qno"></div><div id="qt">按下「出發」開始冒險！</div><div id="opts"></div></div>
+
+<div id="start" class="ov">
+ <h2>AI 魔王城</h2>
+ <p>智慧大陸被「過擬合魔王」封印，AI 知識是唯一的武器。<br>一路擊退雜訊史萊姆、偏誤蝙蝠、黑盒石像，抵達魔王城。<br>答對：勇者攻擊 ⚔️　答錯：怪物反擊 💥<br>共 10 題，答對越快分數越高。</p>
+ <input id="pid" placeholder="輸入玩家名稱 / 學號" maxlength="30">
+ <button id="go">出發！</button>
+</div>
+<div id="end" class="ov hide">
+ <h2 id="et"></h2><p id="ed"></p>
+ <div style="font-size:20px">總分 <b id="es"></b>　答對 <b id="ec"></b>/10</div>
+ <div><button id="dl">下載 Excel 紀錄 (.xlsx)</button><button id="rs">再玩一次</button></div>
+</div>
+</div>
+<script>
+// ====== 設定 ======
+const VER='1.0.0';
+const ENDPOINT='https://script.google.com/macros/s/AKfycbzj_XSFegQdB1Cvth_FIRbU0RJmXRFRIwrIK6F1LE82yJsfa7aoXB-aas4xZOus_hLh/exec';  // 選填：Google Apps Script / 後端網址；留空則只存在瀏覽器並可下載 xlsx
+const COLS=['ReceivedAt','EventID','SessionID','PlayerID','Sequence','EventType','GameVersion','Round','QuestionID','SourcePage','SourceQuestionNo','SelectedOption','CorrectOption','IsCorrect','ResponseMs','ElapsedMs','PlayerHP','BossHP','DamageToPlayer','DamageToBoss','Score','CorrectCount','Ending','RequestHash','ResponseJSON'];
+
+// ====== 題庫（取自 PDF，pg=PDF頁碼，no=原題號）======
+const QS=[
+{id:'Q01',pg:1,no:50,q:'人工智慧是電腦科學的一個分支，人工智慧的英文縮寫是？',o:['BI','APP','DI','AI'],a:'D'},
+{id:'Q02',pg:3,no:45,q:'「人工智慧物聯網」的英文縮寫是？',o:['Smart IoT','AI','IoT','AIoT'],a:'D'},
+{id:'Q03',pg:1,no:3,q:'機器學習有三種主要類型：監督學習、非監督學習和＿＿＿學習。',o:['自主','優化','重複','強化'],a:'D'},
+{id:'Q04',pg:1,no:8,q:'ANN 模仿生物神經網路，其中的＿＿＿扮演突觸的角色，用於調節一個神經元對另一個神經元的影響程度。',o:['權重','輸出通道','輸入通道','細胞體'],a:'A'},
+{id:'Q05',pg:1,no:9,q:'SAE 定義自動駕駛為六級，「完全自動駕駛」的車輛是哪一級？',o:['Level 0','Level 4','Level 5','Level 1'],a:'C'},
+{id:'Q06',pg:3,no:61,q:'製造執行系統的英文簡稱是？',o:['AGV','CPS','MES','SOP'],a:'C'},
+{id:'Q07',pg:2,no:34,q:'建立機器學習模型時，通常用＿＿＿的已知歷史資料作為訓練資料，剩下的＿＿＿作為測試資料。',o:['20%-30%, 70%-80%','70%-80%, 20%-30%','50%, 50%','任意, 任意'],a:'B'},
+{id:'Q08',pg:3,no:65,q:'無監督學習又稱歸納性學習，分為＿＿＿。',o:['聚類(分群)和降維','分類和回歸','聚類(分群)和回歸','分類和降維'],a:'A'},
+{id:'Q09',pg:2,no:41,q:'神經網路每一層神經元的輸出就是下一層的輸入，一層一層傳遞下去，這種神經網路又稱為？',o:['卷積神經網路 CNN','深度置信網路 DBN','遞迴神經網路 RNN','前饋神經網路'],a:'D'},
+{id:'Q10',pg:2,no:37,q:'機器學習模型有時會「背考古題」，遇過的都會，但沒見過的問題卻回答得很離譜，這種情況稱作？',o:['syntax error (語法錯誤)','over guess (過度猜想)','overfitting (過度擬合)','just make it (正好)'],a:'C'}];
+
+const ST=[
+{n:'雜訊史萊姆',e:'👾',qs:[0,1],sky:['#7ec8ff','#d6f0ff'],m:'#8fb4d9',t:'#3f9b4a',g:'#5aa84f'},
+{n:'偏誤蝙蝠',e:'🦇',qs:[2,3],sky:['#f4a261','#ffe0b2'],m:'#b07a52',t:'#6b8e3a',g:'#8a6d3b'},
+{n:'黑盒石像',e:'🗿',qs:[4,5],sky:['#5b5f97','#a7a9d6'],m:'#4a4d7a',t:'#3a3d5c',g:'#55587f'},
+{n:'過擬合魔王',e:'👹',qs:[6,7,8,9],boss:1,sky:['#2b0a14','#7a1f33'],m:'#3b1020',t:'#240a14',g:'#3a1a24'}];
+
+// ====== 狀態 ======
+const $=id=>document.getElementById(id),W=960,H=400,GY=330;
+const cv=$('cv'),c=cv.getContext('2d');
+let S={};
+const mod=(a,m)=>((a%m)+m)%m, ease=p=>p<.5?2*p*p:1-Math.pow(-2*p+2,2)/2;
+const uid=()=>crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2);
+function hash(s){let h1=0xdeadbeef,h2=0x41c6ce57;for(let i=0;i<s.length;i++){const k=s.charCodeAt(i);h1=Math.imul(h1^k,2654435761);h2=Math.imul(h2^k,1597334677)}h1=Math.imul(h1^h1>>>16,2246822507)^Math.imul(h2^h2>>>13,3266489909);h2=Math.imul(h2^h2>>>16,2246822507)^Math.imul(h1^h1>>>13,3266489909);return(4294967296*(2097151&h2)+(h1>>>0)).toString(16)}
+
+function init(pid){
+  S={sid:uid(),pid,seq:0,t0:Date.now(),hp:100,ehp:100,score:0,cc:0,qi:0,si:0,scroll:0,log:[],anim:null,ms:'alive',float:null,over:false,qT:0};
+  lg('session_start');upd();
+}
+function lg(type,x={}){
+  const q=x.q;S.seq++;
+  const r={ReceivedAt:new Date().toISOString(),EventID:uid(),SessionID:S.sid,PlayerID:S.pid,Sequence:S.seq,EventType:type,GameVersion:VER,
+   Round:q?S.qi+1:'',QuestionID:q?q.id:'',SourcePage:q?q.pg:'',SourceQuestionNo:q?q.no:'',SelectedOption:x.sel||'',CorrectOption:q?q.a:'',
+   IsCorrect:x.ok===undefined?'':(x.ok?1:0),ResponseMs:x.rt===undefined?'':x.rt,ElapsedMs:Date.now()-S.t0,PlayerHP:S.hp,BossHP:S.ehp,
+   DamageToPlayer:x.dp||0,DamageToBoss:x.db||0,Score:S.score,CorrectCount:S.cc,Ending:x.end||'',RequestHash:'',ResponseJSON:''};
+  r.RequestHash=hash(JSON.stringify(r));
+  r.ResponseJSON=ENDPOINT?'{"status":"sent"}':'{"status":"local"}';
+  S.log.push(r);
+  if(ENDPOINT)fetch(ENDPOINT,{method:'POST',mode:'no-cors',headers:{'Content-Type':'text/plain'},body:JSON.stringify(r)}).catch(()=>{});
+}
+function upd(){
+  const st=ST[S.si];
+  $('hpt').textContent=S.hp;$('hpb').style.width=S.hp+'%';
+  $('eht').textContent=S.ehp;$('ehb').style.width=S.ehp+'%';
+  $('en').textContent=st.e+' '+st.n;$('sc').textContent=S.score;
+}
+
+// ====== 流程 ======
+function newStage(){
+  const st=ST[S.si];S.ehp=100;S.ms='alive';upd();
+  S.anim={k:'walk',t:performance.now(),d:1700,cb:askQ};
+  $('qt').textContent=st.boss?'⚠️ 魔王城到了…':'前方出現了 '+st.n+'！';$('qno').textContent='';$('opts').innerHTML='';
+}
+function askQ(){
+  const q=QS[S.qi];S.anim=null;S.qT=performance.now();
+  $('qno').textContent=`第 ${S.qi+1}/10 題　${ST[S.si].boss?'👹 魔王戰':'小怪戰'}`;
+  $('qt').textContent=q.q;
+  const L='ABCD';$('opts').innerHTML=q.o.map((t,i)=>`<button data-k="${L[i]}">(${L[i]}) ${t}</button>`).join('');
+  [...$('opts').children].forEach(b=>b.onclick=()=>answer(b.dataset.k));
+  lg('question_shown',{q});
+}
+function answer(sel){
+  if(S.anim||S.over||!$('opts').children.length)return;
+  const q=QS[S.qi],st=ST[S.si],rt=Math.round(performance.now()-S.qT),ok=sel===q.a;
+  [...$('opts').children].forEach(b=>{b.disabled=true;if(b.dataset.k===q.a)b.style.borderColor='#4cd964';else if(b.dataset.k===sel)b.style.borderColor='#ff4d4d'});
+  let dp=0,db=0;
+  if(ok){db=Math.ceil(100/st.qs.length);S.ehp=Math.max(0,S.ehp-db);S.cc++;S.score+=100+Math.max(0,50-Math.round(rt/200));}
+  else{dp=st.boss?25:15;S.hp=Math.max(0,S.hp-dp);}
+  lg('answer_submitted',{q,sel,ok,rt,dp,db});
+  S.float={txt:ok?'-'+db:'-'+dp,ok};
+  $('qt').textContent=(ok?'✅ 答對了！':'❌ 答錯了！正確答案是 '+q.a)+'　';
+  S.anim={k:ok?'hit':'hurt',t:performance.now(),d:1000,cb:()=>{upd();after();}};
+}
+function after(){
+  S.anim=null;
+  if(S.hp<=0)return finish();
+  S.qi++;
+  if(S.qi>=10)return finish();
+  if(S.qi>ST[S.si].qs[ST[S.si].qs.length-1]){
+    S.anim={k:'exit',t:performance.now(),d:800,cb:()=>{S.si++;newStage();}};
+    $('opts').innerHTML='';$('qt').textContent=S.ehp<=0?'🎉 擊倒了 '+ST[S.si].n+'！繼續前進…':ST[S.si].n+' 負傷逃走了，繼續前進…';
+  }else askQ();
+}
+function finish(){
+  const win=S.hp>0&&S.ehp<=0,ending=win?'SUCCESS':'FAIL';
+  S.over=true;S.ending=ending;
+  lg('game_end',{end:ending});
+  S.anim={k:win?'boom':'fall',t:performance.now(),d:1500,cb:()=>{
+    $('et').textContent=win?'🏆 成功！魔王被擊敗':'💀 失敗…勇者倒下了';
+    $('ed').textContent=win?'你用 AI 知識破解了過擬合魔王的詛咒，智慧大陸重獲和平！':(S.hp<=0?'勇者體力耗盡，魔王城的大門再次關閉…再挑戰一次吧！':'你撐到了最後，但魔王尚未被擊敗…再試一次吧！');
+    $('es').textContent=S.score;$('ec').textContent=S.cc;$('end').classList.remove('hide');}};
+  $('opts').innerHTML='';
+}
+
+// ====== 繪圖 ======
+function tri(x,y,w,h){c.beginPath();c.moveTo(x,y);c.lineTo(x+w/2,y-h);c.lineTo(x+w,y);c.fill()}
+function emoji(ch,x,y,size,o={}){
+  c.save();c.translate(x,y);if(o.rot)c.rotate(o.rot);c.globalAlpha=o.a??1;c.font=size+'px serif';c.textAlign='center';c.textBaseline='bottom';
+  if(o.flip)c.scale(-1,1);c.fillText(ch,0,0);c.restore();
+}
+function scene(){
+  const st=ST[Math.min(S.si||0,3)],sc=S.scroll||0;
+  const g=c.createLinearGradient(0,0,0,GY);g.addColorStop(0,st.sky[0]);g.addColorStop(1,st.sky[1]);c.fillStyle=g;c.fillRect(0,0,W,H);
+  c.fillStyle=st.m;for(let i=0;i<6;i++)tri(mod(i*260-sc*.3,1560)-260,GY,260,150+(i%3)*30);
+  c.fillStyle=st.t;for(let i=0;i<7;i++){const x=mod(i*180-sc*.6,1260)-180;c.fillRect(x+8,GY-70,10,70);c.beginPath();c.arc(x+13,GY-80,26,0,7);c.fill()}
+  c.fillStyle=st.g;c.fillRect(0,GY,W,H-GY);c.fillStyle='rgba(255,255,255,.15)';
+  for(let i=0;i<14;i++)c.fillRect(mod(i*90-sc,1260)-90,GY+14+(i%3)*18,46,5);
+}
+function frame(now){
+  const a=S.anim,boss=ST[S.si||0].boss;let hx=150,mx=720,mo={},ho={},p=0,msz=boss?140:96;
+  if(S.sid){
+    if(a){p=Math.min(1,(now-a.t)/a.d);
+      if(a.k==='walk'){S.scroll+=7*(1-p*.6);mx=1250-530*ease(p);ho.dy=-Math.abs(Math.sin(now/110))*8}
+      if(a.k==='hit'){hx=p<.5?150+410*ease(p*2):150+410*ease(2-p*2)}
+      if(a.k==='hurt'){mx=720-480*Math.sin(Math.PI*Math.min(1,p*1.3));if(p>.4&&p<.8)ho.dx=Math.sin(now/20)*8}
+      if(a.k==='exit'){S.scroll+=4;if(S.ehp<=0){mo.rot=p*1.6;mo.a=1-p}else{mx=720+500*p;mo.a=1-p}}
+      if(a.k==='boom'){mo.a=1-p;msz=140*(1+p)}
+      if(a.k==='fall'){ho.rot=-1.4*p}
+      if(p>=1){const cb=a.cb;a.cb=null;if(cb)cb()}
+    }
+    if(S.ms==='alive'&&!a)ho.dy=Math.sin(now/300)*3;
+  }
+  scene();
+  if(S.sid){
+    const st=ST[S.si];
+    if(!(a&&a.k==='exit'&&S.over)){
+      const hurtM=a&&a.k==='hit'&&p>.5&&p<.9&&Math.floor(now/60)%2;
+      emoji(st.e,mx+(a&&a.k==='hit'&&p>.5&&p<.9?Math.sin(now/25)*6:0),GY+8,msz,{a:hurtM?.3:(mo.a??1),rot:mo.rot,flip:1});
+      if(S.ehp<=0&&st.boss&&!(a&&a.k==='boom'))emoji('💫',mx,GY-msz+10,40);
+    }
+    const dead=S.over&&S.ending==='FAIL';
+    emoji('🦸',hx+(ho.dx||0),GY+8+(ho.dy||0),84,{rot:ho.rot,flip:0});
+    if(a&&a.k==='hit'&&p>.4&&p<.75){c.strokeStyle='#fff';c.lineWidth=8;c.beginPath();c.arc(mx-60,GY-60,70,-1.2,1.2);c.stroke();emoji('⚔️',mx-90,GY-30,60)}
+    if(a&&a.k==='hurt'&&p>.4&&p<.8){c.fillStyle='rgba(255,0,0,.25)';c.fillRect(0,0,W,H);emoji('💥',hx+40,GY-30,70)}
+    if(a&&a.k==='boom'){emoji('💥',mx,GY-30,200*p+50,{a:1-p*.5})}
+    if(a&&(a.k==='hit'||a.k==='hurt')&&S.float&&p>.45){
+      const fy=GY-130-(p-.45)*90,fx=a.k==='hit'?mx:hx;
+      c.font='bold 40px sans-serif';c.textAlign='center';c.fillStyle=a.k==='hit'?'#ffe066':'#ff6b6b';c.strokeStyle='#000';c.lineWidth=4;
+      c.strokeText(S.float.txt,fx,fy);c.fillText(S.float.txt,fx,fy)}
+  }
+  requestAnimationFrame(frame);
+}
+
+// ====== 下載 Excel ======
+function download(){
+  const name='GameLog_'+S.pid+'_'+S.sid.slice(0,8);
+  if(window.XLSX){
+    const ws=XLSX.utils.json_to_sheet(S.log,{header:COLS}),wb=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb,ws,'GameLog');XLSX.writeFile(wb,name+'.xlsx');
+  }else{
+    const esc=v=>'"'+String(v).replace(/"/g,'""')+'"';
+    const csv='\ufeff'+COLS.join(',')+'\n'+S.log.map(r=>COLS.map(k=>esc(r[k])).join(',')).join('\n');
+    const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download=name+'.csv';a.click();
+  }
+}
+
+// ====== 事件 ======
+function begin(){
+  const pid=$('pid').value.trim()||'P'+Math.floor(Math.random()*9000+1000);
+  init(pid);$('start').classList.add('hide');$('end').classList.add('hide');newStage();
+}
+$('go').onclick=begin;
+$('rs').onclick=()=>{$('end').classList.add('hide');begin()};
+$('dl').onclick=download;
+document.addEventListener('keydown',e=>{const k='abcd1234'.indexOf(e.key.toLowerCase());if(k>=0)answer('ABCD'[k%4])});
+S={};requestAnimationFrame(frame);
+</script></body></html>
